@@ -6,77 +6,59 @@
 
  AUTHOR   : Zadenxx
  TARGETS  : Windows (VS Code dev) · Android/iOS (`flet build`) · GitHub Pages
- RUNTIME  : Python 3.9+  ·  Flet >= 0.21 (tested through 0.85.x)
+ RUNTIME  : Python 3.10+  ·  Flet >= 0.21 (tested through 0.85.x)
 
  -----------------------------------------------------------------------------
  RUNNING IN VS CODE (WINDOWS)
  -----------------------------------------------------------------------------
-   python -m pip install "flet[all]>=0.21"
-   python zadenxx_account_manager.py            # native desktop window
-   python zadenxx_account_manager.py --web      # browser preview instead
-   flet run zadenxx_account_manager.py          # hot-reload dev server
+   pip install -r requirements.txt
+   python zadenxx_account_manager.py        # native desktop window
+   python zadenxx_account_manager.py --web  # browser preview instead
+   flet run zadenxx_account_manager.py      # hot-reload dev server
 
-   Debug with F5: create .vscode/launch.json ->
-     { "version": "0.2.0",
-       "configurations": [ { "name": "Zadenxx", "type": "debugpy",
-         "request": "launch", "program": "zadenxx_account_manager.py",
-         "console": "integratedTerminal" } ] }
+   Debug with F5 (.vscode/launch.json included).
 
  -----------------------------------------------------------------------------
- RUNNING ON GITHUB (Codespaces)
+ DEPLOYING TO GITHUB PAGES (automatic)
  -----------------------------------------------------------------------------
-   GitHub cannot execute Python directly. In Codespaces you can develop
-   interactively:
-     1. Open the repo in Codespaces.
-     2. Run:  flet run --web zadenxx_account_manager.py
-     3. VS Code forwards the port automatically -> open the forwarded
-        "Web" URL in your browser. Same app, live preview.
+   .github/workflows/deploy-pages.yml compiles the app with `flet build web`
+   and publishes build/web to GitHub Pages on every push to main/master.
 
- -----------------------------------------------------------------------------
- DEPLOYING TO GITHUB PAGES (this repo includes the workflow)
- -----------------------------------------------------------------------------
-   .github/workflows/deploy-pages.yml builds the app with
-   `flet build web` and publishes build/web to Pages on every push.
-
-   1. Push this repository to GitHub (main branch).
+   1. Push this repo to GitHub (main branch).
    2. Actions tab -> "Deploy to GitHub Pages" runs automatically.
-   3. Settings -> Pages -> Source: "GitHub Actions" (IMPORTANT: not a branch).
-   4. App is live at https://<user>.github.io/<repo-name>/
+      Wait for BOTH jobs (Build web app + Deploy) to finish green.
+   3. Repo -> Settings -> Pages -> Source: "GitHub Actions" -> Save.
+   4. Open the URL shown at the end of the Deploy job, or
+      https://<user>.github.io/<repo-name>/
 
-   * Project sites are served under /<repo-name>/; the workflow passes that
-     as --base-url automatically. For a user site (username.github.io),
-     change --base-url to "/" in the workflow.
-   * --route-url-strategy hash makes routing work without SPA rewrites.
+   The workflow computes --base-url automatically:
+     * project site  (user/repo)        -> /repo-name/
+     * user site     (user/user.github.io) -> /
+   Hash routing is used so no SPA rewrites are needed on static hosting.
 
  -----------------------------------------------------------------------------
- MOBILE & WEB DEPLOYMENT (flet build, local)
+ MOBILE BUILD (local)
  -----------------------------------------------------------------------------
-   flet build apk            -> build/apk/app-release.apk      (Win/macOS/Linux)
-   flet build aab            -> build/aab/...                  (Play Store)
-   flet build ipa            -> build/ipa/...                  (macOS + Xcode only)
+   flet build apk            -> build/apk/app-release.apk   (Windows/macOS/Linux)
+   flet build aab            -> build/aab/...               (Play Store)
+   flet build ipa            -> build/ipa/...               (macOS + Xcode only)
    flet build ios-simulator  -> simulator bundle (macOS only)
-   flet build web            -> build/web/  (static site, what Pages hosts)
 
  -----------------------------------------------------------------------------
  ARCHITECTURE NOTES
  -----------------------------------------------------------------------------
-   * STATE ROUTING   — a tiny explicit state machine (self.state ∈
-     {"login", "dashboard"}) drives the single root container. `route()`
-     swaps the root content, optionally through a fade AnimatedSwitcher,
-     which is how the login -> dashboard transition stays "seamless".
-   * STORAGE         — `AccountStore` persists accounts + activity events to a
-     JSON file. The data directory is resolved platform-agnostically:
-     (1) Flet's runtime storage env var `FLET_APP_STORAGE_DATA` (set on
-     Android/iOS/desktop by the Flet runtime), (2) `Path.home()` on desktop,
-     (3) the CWD as a last resort. On static web hosting (GitHub Pages) writes
-     degrade gracefully to in-memory mode with an on-screen banner.
-   * SECURITY LAYER  — hardcoded owner identity (spec requirement), verified
-     with constant-time `hmac.compare_digest`, 5-attempt lockout with a 30 s
-     cooldown, and a persisted session token so the app re-authenticates
-     across restarts until "Sign out".
-   * THEME           — strict monochrome: black canvas, white/grey ink, and a
-     top-anchored opacity slider (0.2 -> 1.0) driving the alpha of the main
-     dashboard panel (Container.opacity works on desktop, mobile and web).
+   * STATE ROUTING   — explicit state machine (self.state ∈ {"login",
+     "dashboard"}) drives a single root container; `route()` swaps content
+     through a fade AnimatedSwitcher for a seamless login -> dashboard shift.
+   * STORAGE         — AccountStore persists accounts + activity events as
+     JSON. Data dir resolution: $FLET_APP_STORAGE_DATA (mobile/desktop runtime)
+     -> Path.home()/.zadenxx (desktop) -> CWD fallback. On static web hosting
+     writes degrade gracefully to in-memory mode with an on-screen banner.
+   * SECURITY LAYER  — hardcoded owner identity (spec), verified with
+     constant-time hmac.compare_digest, 5-attempt lockout with 30 s cooldown,
+     persisted session token so the app stays signed in across restarts.
+   * THEME           — strict monochrome: black canvas, white/grey ink,
+     top-anchored opacity slider (0.2 -> 1.0) driving the main panel alpha.
 ===============================================================================
 """
 
@@ -176,7 +158,7 @@ class AccountStore:
         2. ~/.zadenxx               -> normal per-user location on desktop.
         3. <cwd>/.zadenxx_data      -> last resort (web dev / sandbox); on
            read-only static hosting (GitHub Pages) writes fail gracefully and
-           the app drops into in-memory mode with a visible warning banner.
+           the app drops into in-memory mode with a visible banner.
     """
 
     SCHEMA_VERSION = 1
@@ -704,8 +686,9 @@ class ZadenxxApp:
         """Authentication handler: lockout check -> validate -> route.
 
         Runs synchronously with a short deliberate delay to sell the
-        "verifying" moment; the lockout timer re-enables the button from a
-        background thread (Flet page updates are thread-safe)."""
+        "verifying" moment (skipped on web builds where blocking the event
+        loop would cause jank); the lockout timer re-enables the button from
+        a background thread (Flet page updates are thread-safe)."""
         now = time.time()
         if now < self.lock_until:
             self._set_error(
@@ -723,7 +706,8 @@ class ZadenxxApp:
         self.login_button.disabled = True
         self.login_button.text = "Authenticating…"
         self.page.update()
-        time.sleep(0.55)
+        if not self.is_web:           # skip artificial delay on web builds
+            time.sleep(0.55)
 
         # --- verification ---------------------------------------------------
         if not self.auth.verify(user, pwd):
