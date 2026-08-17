@@ -1,12 +1,15 @@
 [project]
 name = "zadenxx-account-manager"
 version = "2.4.1"
-description = "Monochrome, owner-only account manager built with Flet (desktop / mobile / web)."
-requires-python = ">=3.9"
+description = "Monochrome owner-only account manager — Flet desktop / mobile / web."
+requires-python = ">=3.10"
 dependencies = ["flet>=0.21"]
 
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [tool.flet.web]
-# Defaults; the workflow overrides base_url per repository at build time.
-# "hash" routing = works on static hosts without SPA rewrites (GitHub Pages).
+# CLI flags in the workflow override these; kept here as safe defaults.
 base_url = "/"
 route_url_strategy = "hash"
