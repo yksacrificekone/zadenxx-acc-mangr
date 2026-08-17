@@ -1,11 +1,11 @@
-#!/usr/bin/env """
+"""
 ===============================================================================
  ZADENXX ACCOUNT MANAGER  —  owner-only account management console
 ===============================================================================
  A cross-platform desktop / mobile / web application built with Flet.
 
  AUTHOR   : Zadenxx
- TARGETS  : Windows (VS Code dev) · Android/iOS (`flet build`) · Web/Pages
+ TARGETS  : Windows (VS Code dev) · Android/iOS (`flet build`) · GitHub Pages
  RUNTIME  : Python 3.9+  ·  Flet >= 0.21 (tested through 0.85.x)
 
  -----------------------------------------------------------------------------
@@ -13,7 +13,7 @@
  -----------------------------------------------------------------------------
    python -m pip install "flet[all]>=0.21"
    python zadenxx_account_manager.py            # native desktop window
-   python zadenxx_account_manager.py --web      # open in the browser instead
+   python zadenxx_account_manager.py --web      # browser preview instead
    flet run zadenxx_account_manager.py          # hot-reload dev server
 
    Debug with F5: create .vscode/launch.json ->
@@ -23,16 +23,39 @@
          "console": "integratedTerminal" } ] }
 
  -----------------------------------------------------------------------------
- MOBILE & WEB DEPLOYMENT (flet build)
+ RUNNING ON GITHUB (Codespaces)
+ -----------------------------------------------------------------------------
+   GitHub cannot execute Python directly. In Codespaces you can develop
+   interactively:
+     1. Open the repo in Codespaces.
+     2. Run:  flet run --web zadenxx_account_manager.py
+     3. VS Code forwards the port automatically -> open the forwarded
+        "Web" URL in your browser. Same app, live preview.
+
+ -----------------------------------------------------------------------------
+ DEPLOYING TO GITHUB PAGES (this repo includes the workflow)
+ -----------------------------------------------------------------------------
+   .github/workflows/deploy-pages.yml builds the app with
+   `flet build web` and publishes build/web to Pages on every push.
+
+   1. Push this repository to GitHub (main branch).
+   2. Actions tab -> "Deploy to GitHub Pages" runs automatically.
+   3. Settings -> Pages -> Source: "GitHub Actions" (IMPORTANT: not a branch).
+   4. App is live at https://<user>.github.io/<repo-name>/
+
+   * Project sites are served under /<repo-name>/; the workflow passes that
+     as --base-url automatically. For a user site (username.github.io),
+     change --base-url to "/" in the workflow.
+   * --route-url-strategy hash makes routing work without SPA rewrites.
+
+ -----------------------------------------------------------------------------
+ MOBILE & WEB DEPLOYMENT (flet build, local)
  -----------------------------------------------------------------------------
    flet build apk            -> build/apk/app-release.apk      (Win/macOS/Linux)
    flet build aab            -> build/aab/...                  (Play Store)
    flet build ipa            -> build/ipa/...                  (macOS + Xcode only)
    flet build ios-simulator  -> simulator bundle (macOS only)
-   flet build web            -> build/web/  (static site -> GitHub Pages)
-
-   GitHub Pages: `flet build web`, then push `build/web` to the `gh-pages`
-   branch (e.g. `git subtree push --prefix build/web origin gh-pages`).
+   flet build web            -> build/web/  (static site, what Pages hosts)
 
  -----------------------------------------------------------------------------
  ARCHITECTURE NOTES
@@ -45,8 +68,8 @@
      JSON file. The data directory is resolved platform-agnostically:
      (1) Flet's runtime storage env var `FLET_APP_STORAGE_DATA` (set on
      Android/iOS/desktop by the Flet runtime), (2) `Path.home()` on desktop,
-     (3) the CWD as a last resort (read-only web hosting degrades gracefully
-     to in-memory storage and shows an "EPHEMERAL STORAGE" banner).
+     (3) the CWD as a last resort. On static web hosting (GitHub Pages) writes
+     degrade gracefully to in-memory mode with an on-screen banner.
    * SECURITY LAYER  — hardcoded owner identity (spec requirement), verified
      with constant-time `hmac.compare_digest`, 5-attempt lockout with a 30 s
      cooldown, and a persisted session token so the app re-authenticates
@@ -374,6 +397,7 @@ class ZadenxxApp:
 
     def __init__(self, page: ft.Page) -> None:
         self.page = page
+        self.is_web = self._detect_web(page)   # True on GitHub Pages builds
         self.store = AccountStore()
         self.auth = AuthManager(self.store.session_file)
 
@@ -411,6 +435,16 @@ class ZadenxxApp:
     # PAGE / ROOT SETUP
     # =========================================================================
 
+    @staticmethod
+    def _detect_web(page) -> bool:
+        """True when running as a compiled web build (e.g. GitHub Pages).
+        Cross-version safe: newer Flet exposes page.platform as a
+        ft.PagePlatform enum, older versions as a plain string."""
+        platform = getattr(page, "platform", None)
+        if platform is None:
+            return False
+        return "web" in str(platform).lower()
+
     def _configure_page(self) -> None:
         """Window + theme setup. Every desktop-only call is guarded so mobile
         and web builds simply skip what they don't support."""
@@ -425,14 +459,15 @@ class ZadenxxApp:
         except Exception:
             pass
 
-        try:  # desktop window geometry (ignored on mobile/web)
-            self.page.window.width = 460
-            self.page.window.height = 840
-            self.page.window.min_width = 380
-            self.page.window.min_height = 620
-            self.page.window.center()
-        except Exception:
-            pass
+        if not self.is_web:  # desktop window geometry (ignored on mobile/web)
+            try:
+                self.page.window.width = 460
+                self.page.window.height = 840
+                self.page.window.min_width = 380
+                self.page.window.min_height = 620
+                self.page.window.center()
+            except Exception:
+                pass
 
     def _build_root(self) -> None:
         """Single persistent root container. Every view swap only replaces
@@ -803,8 +838,22 @@ class ZadenxxApp:
         header, stat chips, search/create row, account list, activity log."""
         controls: list[ft.Control] = []
 
-        # Ephemeral-storage warning (web hosting without writable storage)
-        if not self.store.persistence_ok:
+        # Hosting-mode banner: web (Pages) vs. read-only storage failure
+        if self.is_web:
+            controls.append(ft.Container(
+                bgcolor=BG_PANEL,
+                border=ft.border.all(1, BORDER_GREY),
+                border_radius=8, padding=8,
+                content=ft.Row(
+                    [ft.Icon(_ic("PUBLIC"), size=14, color=TEXT_GREY),
+                     ft.Text(
+                         "WEB BUILD — running on static hosting; accounts "
+                         "persist per device/browser when storage is available.",
+                         size=11, color=TEXT_GREY)],
+                    spacing=8,
+                ),
+            ))
+        elif not self.store.persistence_ok:
             controls.append(ft.Container(
                 bgcolor=BG_PANEL,
                 border=ft.border.all(1, BORDER_GREY),
@@ -813,8 +862,7 @@ class ZadenxxApp:
                     [ft.Icon(_ic("TERMINAL"), size=14, color=TEXT_GREY),
                      ft.Text(
                          "EPHEMERAL STORAGE — changes won't persist on this "
-                         "platform (static web hosting).", size=11,
-                         color=TEXT_GREY)],
+                         "platform.", size=11, color=TEXT_GREY)],
                     spacing=8,
                 ),
             ))
