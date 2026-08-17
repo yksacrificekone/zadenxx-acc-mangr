@@ -1,44 +1,31 @@
-# =============================================================================
-# Zadenxx Account Manager — GitHub Pages deploy pipeline
-# -----------------------------------------------------------------------------
-# GitHub cannot execute Python. This workflow compiles the Flet app into a
-# static web bundle (WASM) with `flet build web`, then publishes build/web to
-# GitHub Pages. It re-runs on every push to main/master or on manual trigger.
-#
-# After first push:
-#   Settings -> Pages -> Source: "GitHub Actions"   (not a branch!)
-# The site appears at https://<your-user>.github.io/<repo-name>/
-# =============================================================================
-
 name: Deploy to GitHub Pages
 
 on:
   push:
     branches: [main, master]
-  workflow_dispatch:        # lets you hit "Run workflow" manually
-
-permissions:
-  contents: read            # only read source
-  pages: write              # allowed to publish the Pages site
-  id-token: write           # required by actions/deploy-pages
+  workflow_dispatch:
 
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: "pages"
+  cancel-in-progress: false
+
+env:
+  FLET_CLI_NO_RICH_OUTPUT: 1
 
 jobs:
-  # ---- Job 1: compile the Python app into a static web app ---------------
+  # Job 1 — compile the Python app into a static web bundle (WASM/JS)
   build:
+    name: Build web app
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      # Flet downloads a Flutter SDK (~1GB) on first build; cache it so the
-      # next build takes ~2 minutes instead of ~10.
       - name: Cache Flet / Flutter SDK
         uses: actions/cache@v4
         with:
@@ -48,35 +35,43 @@ jobs:
           key: flet-${{ runner.os }}
 
       - name: Install Flet
-        run: pip install --upgrade flet
+        run: python -m pip install --upgrade flet
 
-      - name: Build web bundle
+      - name: Build web app
+        shell: bash
+        env:
+          # Project sites (user/repo) are served under /repo-name/.
+          # User sites (user.github.io) are served from the root.
+          BASE_URL: ${{ github.event.repository.name == github.repository_owner && '/' || format('/{0}', github.event.repository.name) }}
         run: |
-          # --base-url <repo-name> makes the app work under the
-          # /<repo-name>/ subpath of a GitHub project site.
-          # If your repo IS a user site (username.github.io), use --base-url /
           flet build web \
-            --base-url "${GITHUB_REPOSITORY#*/}" \
+            --base-url "${BASE_URL}" \
             --route-url-strategy hash \
             --yes --verbose
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v4.0.0
         with:
           path: build/web
           name: web-build-artifact
           retention-days: 20
 
-  # ---- Job 2: publish the artifact to GitHub Pages ------------------------
+  # Job 2 — publish the compiled site to GitHub Pages
   deploy:
+    name: Deploy to GitHub Pages
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v4.0.5
         with:
           artifact_name: web-build-artifact
