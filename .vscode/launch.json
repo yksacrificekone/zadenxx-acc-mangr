@@ -1,0 +1,12 @@
+{
+  "version": "0.1.0",
+  "configurations": [
+    {
+      "name": "Zadenxx Account Manager",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/zadenxx_account_manager.py",
+      "console": "integratedTerminal"
+    }
+  ]
+}
